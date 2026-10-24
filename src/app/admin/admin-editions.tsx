@@ -23,9 +23,9 @@ import {
   statusLabel,
   writeStoredAdminKey,
   type AdminEditionRow,
+  type EditionAction,
 } from '@/lib/admin-ui'
 import { formatWeekLabel } from '@/lib/utils'
-import type { EditionAction } from '@/lib/pipeline/publish'
 
 function browserSession(): Storage | null {
   if (typeof window === 'undefined') return null

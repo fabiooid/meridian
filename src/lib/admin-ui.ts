@@ -1,7 +1,12 @@
-import { parseEditionAction, type EditionAction } from './pipeline/publish'
-
 export const ADMIN_KEY_STORAGE = 'meridian.admin.apiKey'
 export const ADMIN_EDITIONS_PATH = '/api/admin/editions'
+
+export type EditionAction = 'approve' | 'reject' | 'changes'
+
+function parseUiEditionAction(value: unknown): EditionAction | null {
+  if (value === 'approve' || value === 'reject' || value === 'changes') return value
+  return null
+}
 
 export type AdminEditionRow = {
   editionWeek: string
@@ -101,7 +106,7 @@ export function buildAdminActionRequest(
   key: string,
   input: { editionWeek: string; action: string; note?: string },
 ): RequestInit | { error: string } {
-  const action = parseEditionAction(input.action)
+  const action = parseUiEditionAction(input.action)
   const editionWeek = input.editionWeek.trim()
   if (!action || !editionWeek) {
     return { error: 'Send editionWeek and action (approve, reject, or changes)' }
