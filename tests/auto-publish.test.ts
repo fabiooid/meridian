@@ -29,7 +29,7 @@ describe('PUBLISH_MODE=auto thresholds', () => {
     expect(result).toMatchObject({ status: 'draft', autoPublished: false })
   })
 
-  it('falls back to Telegram review when the kill switch is on', () => {
+  it('falls back to human review when the kill switch is on', () => {
     const result = decideCompileStatus({
       mode: 'auto',
       killSwitch: true,
@@ -39,7 +39,7 @@ describe('PUBLISH_MODE=auto thresholds', () => {
     expect(result).toMatchObject({ status: 'in_review', autoPublished: false, reason: 'kill switch on' })
   })
 
-  it('falls back to Telegram review before there are enough prior editions', () => {
+  it('falls back to human review before there are enough prior editions', () => {
     const result = decideCompileStatus({
       mode: 'auto',
       killSwitch: false,

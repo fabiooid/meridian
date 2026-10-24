@@ -32,20 +32,3 @@ export function authorizeCron(provided: string | null): { ok: true } | { ok: fal
   }
   return authorizeAdmin(provided)
 }
-
-export function authorizeTelegram(secretHeader: string | null): { ok: true } | { ok: false; status: number; error: string } {
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET
-  if (!expected) {
-    return { ok: false, status: 503, error: 'Telegram webhook is not configured' }
-  }
-  if (!secretHeader || !safeEqual(expected, secretHeader)) {
-    return { ok: false, status: 401, error: 'Unauthorized' }
-  }
-  return { ok: true }
-}
-
-export function isAllowedTelegramChat(chatId: string | number | undefined): boolean {
-  const expected = process.env.TELEGRAM_CHAT_ID
-  if (!expected || chatId === undefined) return false
-  return String(chatId) === expected
-}

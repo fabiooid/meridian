@@ -1,9 +1,9 @@
+import { eq } from 'drizzle-orm'
 import { compileEdition } from '../src/lib/pipeline/compile'
 import { ingestSources } from '../src/lib/pipeline/ingest'
-import { sendTelegramPreview } from '../src/lib/pipeline/telegram'
+import { editionPreviewUrl } from '../src/lib/pipeline/publish'
 import { closeDb, getDb } from '../src/lib/db'
-import { editions, editionStories } from '../src/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { editions } from '../src/lib/db/schema'
 
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`) || process.env.PIPELINE_MODE === name
@@ -14,30 +14,24 @@ function jobName(): string {
   return process.env.PIPELINE_JOB || args[0] || 'help'
 }
 
-async function sendPreview(editionId: string, editionWeek: string, previewToken: string, passed: boolean) {
-  const db = await getDb()
-  const stories = await db.select().from(editionStories).where(eq(editionStories.editionId, editionId))
-  const result = await sendTelegramPreview({
-    editionWeek,
-    storyCount: stories.length,
-    headlines: stories.map((story) => story.headline),
-    previewToken,
-    passed,
-  })
-  if (!result.sent) {
-    console.log(`Telegram preview not sent: ${result.reason}`)
-  } else {
-    console.log('Telegram preview sent')
+function logReviewQueue(
+  rows: { editionWeek: string; previewToken: string; status: string }[],
+) {
+  if (rows.length === 0) {
+    console.log('No editions waiting for review')
+    return
+  }
+  for (const edition of rows) {
+    console.log(
+      `${edition.editionWeek} is ${edition.status}. Preview: ${editionPreviewUrl(edition.previewToken)}`,
+    )
   }
 }
 
 async function remind() {
   const db = await getDb()
   const rows = await db.select().from(editions).where(eq(editions.status, 'in_review'))
-  for (const edition of rows) {
-    await sendPreview(edition.id, edition.editionWeek, edition.previewToken, true)
-  }
-  if (rows.length === 0) console.log('No editions waiting for review')
+  logReviewQueue(rows)
 }
 
 async function main() {
@@ -49,7 +43,8 @@ async function main() {
   if (job === 'help' || job === '--help') {
     console.log(`Usage: tsx scripts/pipeline.ts <ingest|compile|remind|cron> [--mock] [--dry-run]
 
-Railway cron: set PROCESS_ROLE=pipeline and PIPELINE_JOB=ingest|compile|remind
+Railway cron: set PROCESS_ROLE=pipeline and PIPELINE_JOB=ingest|compile
+remind lists editions waiting for admin approval. It does not send messages.
 `)
     return
   }
@@ -63,10 +58,11 @@ Railway cron: set PROCESS_ROLE=pipeline and PIPELINE_JOB=ingest|compile|remind
   if (job === 'compile') {
     const result = await compileEdition({ mock, dryRun, publishDemo })
     console.log(JSON.stringify(result, null, 2))
-    if (!dryRun && !publishDemo && !result.autoPublished) {
-      await sendPreview(result.editionId, result.editionWeek, result.previewToken, result.passed)
-    } else if (result.autoPublished) {
+    if (result.autoPublished) {
       console.log(`Auto-published ${result.editionWeek}: ${result.publishReason}`)
+    } else if (!dryRun && !publishDemo) {
+      console.log(`Waiting for admin approval: ${result.editionWeek}`)
+      console.log(`Preview: ${result.previewUrl}`)
     }
     return
   }

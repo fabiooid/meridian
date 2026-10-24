@@ -4,17 +4,15 @@
 
 A weekly briefing of the week's biggest AI stories, explained plainly, with a local read for the place each story lands. Ten minutes, once a week, published on Tuesday morning Hong Kong time.
 
-This repo is a rebuild of the old Edge Daily site. Milestone 1 is a working end-to-end weekly edition: a Next.js site, Postgres, a Node pipeline you run as a CLI, blocking checks before approval, and a Telegram approve / reject / request-changes flow.
+This repo is a rebuild of the old Edge Daily site. Milestone 1 is a working end-to-end weekly edition: a Next.js site, Postgres, a Node pipeline you run as a CLI, blocking checks before approval, and an admin API to approve, reject, or request changes.
 
 ## What you need to set up by hand
 
 1. Create a Railway project and add a Postgres plugin, **or** create a Neon database. Copy the `DATABASE_URL`.
-2. Create a Telegram bot with [BotFather](https://t.me/BotFather). Copy the bot token. Send the bot a message, then note your chat id.
-3. Create an Anthropic API key.
-4. Set the env vars below on the Railway web service and on the Railway cron service.
-5. Point the Telegram webhook at `https://YOUR-RAILWAY-HOST/api/telegram/webhook` with a secret token header.
-6. Run migrate and seed sources once.
-7. If you still have the old Vercel project, switch it only after Railway is live. Vercel is optional.
+2. Create an Anthropic API key.
+3. Set the env vars below on the Railway web service and on the Railway cron service.
+4. Run migrate and seed sources once.
+5. If you still have the old Vercel project, switch it only after Railway is live. Vercel is optional.
 
 ## Deploy on Railway (primary)
 
@@ -31,10 +29,8 @@ The site is a normal Node Next.js app. The weekly pipeline is the same repo, sta
 DATABASE_URL=
 SITE_URL=https://YOUR-APP.up.railway.app
 ADMIN_API_KEY=
+CRON_SECRET=
 ANTHROPIC_API_KEY=
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-TELEGRAM_WEBHOOK_SECRET=
 PUBLISH_MODE=manual
 PROCESS_ROLE=web
 ```
@@ -62,7 +58,6 @@ You can either add a third service, or change the one cron service's schedule an
 
 - Ingest: `PIPELINE_JOB=ingest`, `30 21 * * *`
 - Compile: `PIPELINE_JOB=compile`, `0 10 * * 1`
-- Reminder (optional): `PIPELINE_JOB=remind`, `0 23 * * 1` (Tuesday 07:00 HKT)
 
 Give the cron service the same env vars as the web service, plus:
 
@@ -71,19 +66,33 @@ PROCESS_ROLE=pipeline
 PIPELINE_JOB=compile
 ```
 
-The compile job writes a draft edition, runs blocking checks, and sends a Telegram preview. Approve publishes the edition page.
+The compile job writes a draft edition, runs blocking checks, and leaves it in review. Approve it with the admin API to publish the edition page. Compile does not send messages.
 
-### 3. Telegram webhook
+### 3. Approve or reject an edition
+
+`PUBLISH_MODE=manual` is the default. A passing compile stays in review until you approve it. Do not turn on auto-publish unless you mean to.
+
+Use `ADMIN_API_KEY` (Bearer token). Cron can start ingest or compile with `CRON_SECRET`, but only `ADMIN_API_KEY` can approve or reject.
+
+List editions waiting for a decision, with private preview links:
 
 ```bash
-curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-  -d "url=https://YOUR-APP.up.railway.app/api/telegram/webhook" \
-  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  https://YOUR-APP.up.railway.app/api/admin/editions
 ```
 
-The webhook only accepts presses from `TELEGRAM_CHAT_ID` and only if the secret header matches. If the secret is missing, the route refuses every request.
+Approve, reject, or send it back to draft:
 
-You can keep a second always-on Telegram bot on Railway. This app only needs the webhook above.
+```bash
+curl -X POST https://YOUR-APP.up.railway.app/api/admin/editions \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"editionWeek":"2026-W43","action":"approve"}'
+```
+
+`action` can be `approve`, `reject`, or `changes`. Approve publishes the edition page. The preview URL is a private look at the draft only. It does not have approve buttons.
+
+If `ADMIN_API_KEY` is missing, these routes refuse every request.
 
 ## Local setup
 
@@ -111,18 +120,19 @@ npx tsx scripts/pipeline.ts remind
 
 `--mock` / `--dry-run` writes an edition without calling Anthropic. Use this in CI or when keys are not set.
 
+`remind` only prints editions still waiting for approval. It does not send messages.
+
 ## Env vars
 
 | Name | Required | What it does |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes in production | Railway Postgres or Neon |
-| `SITE_URL` | Yes in production | Canonical URL for RSS, sitemap, Telegram |
-| `ADMIN_API_KEY` | Yes to trigger by HTTP | Admin routes fail closed if unset |
+| `SITE_URL` | Yes in production | Canonical URL for RSS, sitemap, and private preview links |
+| `ADMIN_API_KEY` | Yes to approve or trigger by HTTP | Admin routes fail closed if unset |
+| `CRON_SECRET` | No | Extra secret for ingest / compile callers |
 | `ANTHROPIC_API_KEY` | Yes for live writing | Not needed for `--mock` |
-| `TELEGRAM_BOT_TOKEN` | Yes for approval | Bot token |
-| `TELEGRAM_CHAT_ID` | Yes for approval | Only this chat can press buttons |
-| `TELEGRAM_WEBHOOK_SECRET` | Yes for the webhook | Fail closed if unset |
 | `PUBLISH_MODE` | No | `manual` (default) or `auto` |
+| `PUBLISH_KILL_SWITCH` | No | When auto is on, this forces human review |
 | `FEATURE_X_SOURCES` | No | Off by default. X costs per read |
 | `MODEL_WRITING` | No | Default `claude-sonnet-5-5` |
 | `MODEL_CHECKS` | No | Default `claude-haiku-4-5` |
@@ -152,7 +162,7 @@ Before an edition can be approved, these blocking checks must pass:
 - Links resolve (skipped only in mock mode)
 - Edition shape (5 to 7 stories; each story is tagged by place, with no Asia quota)
 
-Telegram buttons: Approve, Reject, Request changes. Approve publishes the edition page. `PUBLISH_MODE=manual` is the default. `PUBLISH_MODE=auto` publishes only when the configured eval thresholds are met. Otherwise it falls back to Telegram approval.
+Approve, reject, or request changes with `POST /api/admin/editions` and `ADMIN_API_KEY`. Approve publishes the edition page. `PUBLISH_MODE=manual` is the default. `PUBLISH_MODE=auto` publishes only when the configured eval thresholds are met. Otherwise it stays in review for the same admin API.
 
 ## Tests
 
@@ -183,7 +193,7 @@ config/                 models, publish mode, source lists
 data/                   vetted sources
 drizzle/migrations/     Postgres + pgvector schema
 scripts/pipeline.ts     CLI used by Railway cron
-src/app/                Next.js pages, RSS, sitemap, webhooks
+src/app/                Next.js pages, RSS, sitemap, admin API
 src/lib/pipeline/       ingest, filters, rank, write, checks
 src/lib/pipeline/sources/   rss, huggingface, hackernews, x, scrape stub
 ```
