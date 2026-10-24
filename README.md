@@ -4,7 +4,7 @@
 
 A weekly briefing of the week's biggest AI stories, explained plainly, with a local read for the place each story lands. Ten minutes, once a week, published on Tuesday morning Hong Kong time.
 
-This repo is a rebuild of the old Edge Daily site. Milestone 1 is a working end-to-end weekly edition: a Next.js site, Postgres, a Node pipeline you run as a CLI, blocking checks before approval, and an admin API to approve, reject, or request changes.
+This repo is a rebuild of the old Edge Daily site. Milestone 1 is a working end-to-end weekly edition: a Next.js site, Postgres, a Node pipeline you run as a CLI, blocking checks before approval, and a private admin page to approve, reject, or request changes.
 
 ## What you need to set up by hand
 
@@ -66,24 +66,22 @@ PROCESS_ROLE=pipeline
 PIPELINE_JOB=compile
 ```
 
-The compile job writes a draft edition, runs blocking checks, and leaves it in review. Approve it with the admin API to publish the edition page. Compile does not send messages.
+The compile job writes a draft edition, runs blocking checks, and leaves it in review. Approve it on the private admin page to publish the edition page. Compile does not send messages.
 
 ### 3. Approve or reject an edition
 
 `PUBLISH_MODE=manual` is the default. A passing compile stays in review until you approve it. Do not turn on auto-publish unless you mean to.
 
-Use `ADMIN_API_KEY` (Bearer token). Cron can start ingest or compile with `CRON_SECRET`, but only `ADMIN_API_KEY` can approve or reject.
+Open `https://YOUR-APP/admin`. Enter `ADMIN_API_KEY`. The key stays in this browser tab only. You will see editions in review, a private preview link, and Approve / Reject / Request changes.
 
-List editions waiting for a decision, with private preview links:
+Cron can start ingest or compile with `CRON_SECRET`, but only `ADMIN_API_KEY` can approve or reject. If `ADMIN_API_KEY` is missing, the page and the API refuse every request.
+
+The same actions still work from curl if you need them:
 
 ```bash
 curl -H "Authorization: Bearer $ADMIN_API_KEY" \
   https://YOUR-APP.up.railway.app/api/admin/editions
-```
 
-Approve, reject, or send it back to draft:
-
-```bash
 curl -X POST https://YOUR-APP.up.railway.app/api/admin/editions \
   -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
@@ -91,8 +89,6 @@ curl -X POST https://YOUR-APP.up.railway.app/api/admin/editions \
 ```
 
 `action` can be `approve`, `reject`, or `changes`. Approve publishes the edition page. The preview URL is a private look at the draft only. It does not have approve buttons.
-
-If `ADMIN_API_KEY` is missing, these routes refuse every request.
 
 ## Local setup
 
@@ -128,7 +124,7 @@ npx tsx scripts/pipeline.ts remind
 | --- | --- | --- |
 | `DATABASE_URL` | Yes in production | Railway Postgres or Neon |
 | `SITE_URL` | Yes in production | Canonical URL for RSS, sitemap, and private preview links |
-| `ADMIN_API_KEY` | Yes to approve or trigger by HTTP | Admin routes fail closed if unset |
+| `ADMIN_API_KEY` | Yes to open `/admin` or trigger by HTTP | Admin page and routes fail closed if unset |
 | `CRON_SECRET` | No | Extra secret for ingest / compile callers |
 | `ANTHROPIC_API_KEY` | Yes for live writing | Not needed for `--mock` |
 | `PUBLISH_MODE` | No | `manual` (default) or `auto` |
@@ -162,7 +158,7 @@ Before an edition can be approved, these blocking checks must pass:
 - Links resolve (skipped only in mock mode)
 - Edition shape (5 to 7 stories; each story is tagged by place, with no Asia quota)
 
-Approve, reject, or request changes with `POST /api/admin/editions` and `ADMIN_API_KEY`. Approve publishes the edition page. `PUBLISH_MODE=manual` is the default. `PUBLISH_MODE=auto` publishes only when the configured eval thresholds are met. Otherwise it stays in review for the same admin API.
+Approve, reject, or request changes from `/admin` with `ADMIN_API_KEY`. Approve publishes the edition page. `PUBLISH_MODE=manual` is the default. `PUBLISH_MODE=auto` publishes only when the configured eval thresholds are met. Otherwise it stays in review for the same admin page.
 
 ## Tests
 
@@ -193,7 +189,7 @@ config/                 models, publish mode, source lists
 data/                   vetted sources
 drizzle/migrations/     Postgres + pgvector schema
 scripts/pipeline.ts     CLI used by Railway cron
-src/app/                Next.js pages, RSS, sitemap, admin API
+src/app/                Next.js pages, RSS, sitemap, private admin page
 src/lib/pipeline/       ingest, filters, rank, write, checks
 src/lib/pipeline/sources/   rss, huggingface, hackernews, x, scrape stub
 ```
