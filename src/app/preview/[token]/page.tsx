@@ -31,7 +31,7 @@ export default async function PreviewPage({
         />
         <StatusAlert
           title="Private preview"
-          description="Approval happens in Telegram, not on this page."
+          description="This page is a private look at the draft. Approve or reject it with the admin API, not from this page."
         />
       </PageShell>
       <EditionViewBlock edition={edition} preview />

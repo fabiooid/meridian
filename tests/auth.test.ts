@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { authorizeAdmin, authorizeTelegram } from '../src/lib/auth'
+import { authorizeAdmin, authorizeCron } from '../src/lib/auth'
 
 const original = { ...process.env }
 
 afterEach(() => {
   process.env.ADMIN_API_KEY = original.ADMIN_API_KEY
-  process.env.TELEGRAM_WEBHOOK_SECRET = original.TELEGRAM_WEBHOOK_SECRET
+  process.env.CRON_SECRET = original.CRON_SECRET
 })
 
 describe('fail-closed admin', () => {
@@ -21,8 +21,11 @@ describe('fail-closed admin', () => {
     expect(authorizeAdmin('secret')).toMatchObject({ ok: true })
   })
 
-  it('rejects Telegram when the webhook secret is unset', () => {
-    delete process.env.TELEGRAM_WEBHOOK_SECRET
-    expect(authorizeTelegram('anything')).toMatchObject({ ok: false, status: 503 })
+  it('lets cron callers through with CRON_SECRET, but not as a stand-in for admin approval', () => {
+    process.env.ADMIN_API_KEY = 'admin-secret'
+    process.env.CRON_SECRET = 'cron-secret'
+    expect(authorizeCron('cron-secret')).toMatchObject({ ok: true })
+    expect(authorizeAdmin('cron-secret')).toMatchObject({ ok: false, status: 401 })
+    expect(authorizeAdmin('admin-secret')).toMatchObject({ ok: true })
   })
 })

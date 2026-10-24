@@ -1,7 +1,6 @@
 import { authorizeCron, readBearer } from '@/lib/auth'
 import { compileEdition } from '@/lib/pipeline/compile'
 import { ingestSources } from '@/lib/pipeline/ingest'
-import { sendTelegramPreview } from '@/lib/pipeline/telegram'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,15 +20,6 @@ export async function POST(request: Request) {
 
   if (job === 'compile') {
     const result = await compileEdition({ mock: body.mock })
-    if (result.passed && !result.autoPublished) {
-      await sendTelegramPreview({
-        editionWeek: result.editionWeek,
-        storyCount: result.storyCount,
-        headlines: result.checks.filter((check) => check.name === 'style' && check.passed).map((check) => check.detail),
-        previewToken: result.previewToken,
-        passed: result.passed,
-      })
-    }
     return Response.json(result)
   }
 

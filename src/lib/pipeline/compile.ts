@@ -17,6 +17,7 @@ import {
   storyItems,
 } from '../db/schema'
 import { hashId, id, previewToken, slugify } from '../ids'
+import { editionPreviewUrl } from './publish'
 import {
   decideCompileStatus,
   resolvePublishSettings,
@@ -41,6 +42,7 @@ export type CompileResult = {
   editionWeek: string
   status: string
   previewToken: string
+  previewUrl: string
   storyCount: number
   passed: boolean
   autoPublished: boolean
@@ -326,11 +328,13 @@ export async function compileEdition(options: CompileOptions = {}): Promise<Comp
   }
 
   const saved = await db.select().from(editions).where(eq(editions.id, editionId))
+  const tokenUsed = saved[0]?.previewToken || token
   return {
     editionId,
     editionWeek,
     status: saved[0]?.status || status,
-    previewToken: saved[0]?.previewToken || token,
+    previewToken: tokenUsed,
+    previewUrl: editionPreviewUrl(tokenUsed),
     storyCount: checks.surviving.length,
     passed: checks.passed,
     autoPublished: decision.autoPublished,
