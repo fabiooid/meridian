@@ -1,78 +1,97 @@
 # Meridian
 
-**Meridian: the AI week, wherever it lands.**
+**The AI week, wherever it lands.** A weekly briefing of the week's biggest AI stories, explained plainly, with a local read for the place each story lands. Ten minutes, once a week, published on Tuesday morning Hong Kong time.
 
-A weekly briefing of the week's biggest AI stories, explained plainly, with a local read for the place each story lands. Ten minutes, once a week, published on Tuesday morning Hong Kong time.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node.js >= 22](https://img.shields.io/badge/node-%3E%3D22-339933)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)
+![Status: milestone 1](https://img.shields.io/badge/status-milestone%201-orange)
 
-This repo is a rebuild of the old Edge Daily site. Milestone 1 is a working end-to-end weekly edition: a Next.js site, Postgres, a Node pipeline you run as a CLI, blocking checks before approval, and an admin API to approve, reject, or request changes.
+> [!IMPORTANT]
+> Meridian is a **rebuild** of the old Edge Daily site. Milestone 1 is a working weekly edition: a Next.js site, a local demo, and a Railway deploy path. Publish stays **manual** by default. A passing compile waits for admin approval. Read [Project status](#project-status) before you treat this as a live publication.
 
-## What you need to set up by hand
+---
 
-1. Create a Railway project and add a Postgres plugin, **or** create a Neon database. Copy the `DATABASE_URL`.
-2. Create an Anthropic API key.
-3. Set the env vars below on the Railway web service and on the Railway cron service.
-4. Run migrate and seed sources once.
-5. If you still have the old Vercel project, switch it only after Railway is live. Vercel is optional.
+## Contents
 
-## Deploy on Railway (primary)
+- [What it does](#what-it-does)
+- [Design principles](#design-principles)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Project status](#project-status)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+- [Design credits](#design-credits)
 
-The site is a normal Node Next.js app. The weekly pipeline is the same repo, started as a cron service that runs a CLI script. There is no cron inside the web process.
+## What it does
 
-### 1. Web service
+Meridian compiles a Tuesday edition of five to seven AI stories. Each story is tagged by place. There is no Asia quota.
 
-1. New Railway project from this GitHub repo.
-2. Add a Postgres plugin, or paste a Neon `DATABASE_URL`.
-3. Use the Dockerfile in the repo (`railway.json` already points at it).
-4. Set these variables on the **web** service:
+The pipeline:
 
-```
-DATABASE_URL=
-SITE_URL=https://YOUR-APP.up.railway.app
-ADMIN_API_KEY=
-CRON_SECRET=
-ANTHROPIC_API_KEY=
-PUBLISH_MODE=manual
-PROCESS_ROLE=web
-```
+1. **Ingests** a short, hand-picked source list (labs and newsrooms, plus Hacker News as a signal).
+2. **Writes** a draft edition and runs **blocking checks** (freshness, sources, style, links, edition shape).
+3. **Leaves it in review.** You approve, reject, or send it back with the admin API.
+4. **Publishes** the edition page only after approve. Compile does not send messages.
 
-5. Generate a public URL. That URL is `SITE_URL`.
-6. After the first deploy, run these from a one-off Railway shell or your laptop with the same `DATABASE_URL`:
+Sources live in `data/sources.csv` and are seeded with `npm run db:seed-sources`. Adding a source is a curation choice. The product does not ingest a giant scrape.
+
+Supported source types:
+
+- RSS / Atom
+- Hugging Face models API, filtered by author org
+- Hacker News via Algolia (signal only: never cited; missing HN attention does not lower a story)
+- X stays off unless `FEATURE_X_SOURCES` is on (the live client is not wired in milestone 1)
+
+Meridian starts at Week 1. Earlier Edge Daily posts were not carried over. Old `/post/:slug` and `/archive/v1/:slug` links go to the weekly archive.
+
+## Design principles
+
+- **Curated sources.** A short list you choose. Adding a source is editorial, not a scrape.
+- **Checks block approve.** Freshness (7-day window), source floor (two sources, or one primary), style (no em dashes, no hype words, required sections), links resolve (skipped only in mock mode), and edition shape (5 to 7 stories) must pass first.
+- **Manual publish is the default.** `PUBLISH_MODE=manual` keeps a passing compile in review until you approve it. Auto-publish is opt-in and still falls back to review when thresholds are not met.
+
+## Quick start
+
+**Requirements:** Node.js 22 or newer, and npm.
 
 ```bash
-npm run db:migrate
-npm run db:seed-sources
+git clone https://github.com/fabiooid/meridian.git
+cd meridian
+npm install
+cp .env.example .env
 ```
 
-### 2. Pipeline cron service
+Without `DATABASE_URL`, local commands use a file database in `.data/`. That is for demo and tests only. No API keys are needed for the demo path.
 
-Add a second Railway service from the same repo. Use the same Dockerfile. Override the start command so this service is the CLI, not the website.
-
-**Daily ingest** (05:30 Hong Kong time = 21:30 UTC):
-
-- Start command: `PROCESS_ROLE=pipeline PIPELINE_JOB=ingest node scripts/start.mjs`
-- Cron schedule: `30 21 * * *`
-
-**Monday compile** (18:00 Hong Kong time = 10:00 UTC Monday):
-
-You can either add a third service, or change the one cron service's schedule and `PIPELINE_JOB`. A simple setup is two cron services:
-
-- Ingest: `PIPELINE_JOB=ingest`, `30 21 * * *`
-- Compile: `PIPELINE_JOB=compile`, `0 10 * * 1`
-
-Give the cron service the same env vars as the web service, plus:
-
-```
-PROCESS_ROLE=pipeline
-PIPELINE_JOB=compile
+```bash
+npm test
+npm run demo
+npm run dev
 ```
 
-The compile job writes a draft edition, runs blocking checks, and leaves it in review. Approve it with the admin API to publish the edition page. Compile does not send messages.
+`npm run demo` migrates, seeds the hand-picked sources, and publishes a mock Week 1 edition so you can click through the site.
 
-### 3. Approve or reject an edition
+Then open [http://localhost:3000](http://localhost:3000).
+
+### Pipeline CLI
+
+```bash
+npx tsx scripts/pipeline.ts ingest --dry-run
+npx tsx scripts/pipeline.ts compile --mock
+npx tsx scripts/pipeline.ts remind
+```
+
+`--mock` / `--dry-run` writes an edition without calling Anthropic. Use this in CI or when keys are not set.
+
+`remind` only prints editions still waiting for approval. It does not send messages.
+
+### Approve an edition
 
 `PUBLISH_MODE=manual` is the default. A passing compile stays in review until you approve it. Do not turn on auto-publish unless you mean to.
 
-Use `ADMIN_API_KEY` (Bearer token). Cron can start ingest or compile with `CRON_SECRET`, but only `ADMIN_API_KEY` can approve or reject.
+Use `ADMIN_API_KEY` (Bearer token). Cron can start ingest or compile with `CRON_SECRET`, but only `ADMIN_API_KEY` can approve or reject. If `ADMIN_API_KEY` is missing, these routes refuse every request.
 
 List editions waiting for a decision, with private preview links:
 
@@ -92,111 +111,98 @@ curl -X POST https://YOUR-APP.up.railway.app/api/admin/editions \
 
 `action` can be `approve`, `reject`, or `changes`. Approve publishes the edition page. The preview URL is a private look at the draft only. It does not have approve buttons.
 
-If `ADMIN_API_KEY` is missing, these routes refuse every request.
+### Deploy on Railway
 
-## Local setup
+The site is a Node Next.js app. The weekly pipeline is the same repo, started as a cron service that runs a CLI script. There is no cron inside the web process.
 
-```bash
-npm install
-cp .env.example .env
-```
+**Web service**
 
-Without `DATABASE_URL`, local commands use a file database in `.data/`. That is for demo and tests only.
-
-```bash
-npm run demo
-npm run dev
-```
-
-`npm run demo` migrates, seeds the hand-picked sources, and publishes a mock Week 1 edition so you can click through the site without API keys.
-
-### Pipeline CLI
+1. New Railway project from this GitHub repo. Add a Postgres plugin, or paste a Neon `DATABASE_URL`.
+2. Use the Dockerfile in the repo (`railway.json` already points at it).
+3. Set the web env vars in [Configuration](#configuration), including `PROCESS_ROLE=web` and `PUBLISH_MODE=manual`.
+4. Generate a public URL. That URL is `SITE_URL`.
+5. After the first deploy, run migrate and seed once from a one-off Railway shell, or from your laptop with the same `DATABASE_URL`:
 
 ```bash
-npx tsx scripts/pipeline.ts ingest --dry-run
-npx tsx scripts/pipeline.ts compile --mock
-npx tsx scripts/pipeline.ts remind
+npm run db:migrate
+npm run db:seed-sources
 ```
 
-`--mock` / `--dry-run` writes an edition without calling Anthropic. Use this in CI or when keys are not set.
+**Pipeline cron**
 
-`remind` only prints editions still waiting for approval. It does not send messages.
+Add a second Railway service from the same repo and Dockerfile. Override the start command so this service is the CLI, not the website. A simple setup is two cron services:
 
-## Env vars
+| Job | Start command | Cron (UTC) | Hong Kong time |
+| --- | --- | --- | --- |
+| Daily ingest | `PROCESS_ROLE=pipeline PIPELINE_JOB=ingest node scripts/start.mjs` | `30 21 * * *` | 05:30 |
+| Monday compile | `PROCESS_ROLE=pipeline PIPELINE_JOB=compile node scripts/start.mjs` | `0 10 * * 1` | Monday 18:00 |
 
-| Name | Required | What it does |
-| --- | --- | --- |
-| `DATABASE_URL` | Yes in production | Railway Postgres or Neon |
-| `SITE_URL` | Yes in production | Canonical URL for RSS, sitemap, and private preview links |
-| `ADMIN_API_KEY` | Yes to approve or trigger by HTTP | Admin routes fail closed if unset |
-| `CRON_SECRET` | No | Extra secret for ingest / compile callers |
-| `ANTHROPIC_API_KEY` | Yes for live writing | Not needed for `--mock` |
-| `PUBLISH_MODE` | No | `manual` (default) or `auto` |
-| `PUBLISH_KILL_SWITCH` | No | When auto is on, this forces human review |
-| `FEATURE_X_SOURCES` | No | Off by default. X costs per read |
-| `MODEL_WRITING` | No | Default `claude-sonnet-5-5` |
-| `MODEL_CHECKS` | No | Default `claude-haiku-4-5` |
+Give the cron services the same env vars as the web service, plus `PROCESS_ROLE=pipeline` and the matching `PIPELINE_JOB`. Compile writes a draft, runs blocking checks, and leaves it in review. Approve it with the admin API. Compile does not send messages.
 
-## Sources
-
-The hand-picked list lives in `data/sources.csv`. Seed it with `npm run db:seed-sources`. That list is the default: a short set of labs and newsrooms, plus Hacker News as a signal. Adding a source is a curation choice. The product does not ingest a giant scrape.
-
-Supported source types for that list:
-
-- RSS / Atom
-- Hugging Face models API, filtered by author org
-- Hacker News via Algolia (signal only: never cited; missing HN attention does not lower a story)
-- X stays off unless `FEATURE_X_SOURCES` is on
-
-## Historical posts
-
-Meridian starts at Week 1. The earlier Edge Daily posts were deliberately not carried over. Old `/post/:slug` and `/archive/v1/:slug` links now go to the weekly archive.
-
-## Checks and approval
-
-Before an edition can be approved, these blocking checks must pass:
-
-- Freshness (7-day window in code)
-- Source floor (two sources, or one primary)
-- Style (no em dashes, no hype words, required sections)
-- Links resolve (skipped only in mock mode)
-- Edition shape (5 to 7 stories; each story is tagged by place, with no Asia quota)
-
-Approve, reject, or request changes with `POST /api/admin/editions` and `ADMIN_API_KEY`. Approve publishes the edition page. `PUBLISH_MODE=manual` is the default. `PUBLISH_MODE=auto` publishes only when the configured eval thresholds are met. Otherwise it stays in review for the same admin API.
-
-## Tests
-
-```bash
-npm test
-```
-
-CI runs tests and a production build on every push.
-
-## Optional: Vercel
-
-Railway is the host. If you still want a Vercel frontend later:
-
-1. Import the repo into Vercel.
-2. Set the same env vars, including `DATABASE_URL`.
-3. Do **not** put a cron in the Next.js server. Keep the Railway cron service (or the GitHub Actions example below).
-
-There is no Vercel-only cache or image API in this app. Pages render from Postgres on each request so they work the same on Railway.
-
-## Optional: GitHub Actions cron
+If you still have the old Vercel project, switch it only after Railway is live. Vercel is optional. Do not put a cron in the Next.js server. Keep the Railway cron service.
 
 `docs/examples/pipeline.github-actions.yml` is a manual alternative you can copy into `.github/workflows/` if you want. It has no schedule. Railway cron is the one that should run every week.
 
-## Project layout
+CI runs `npm test` and a production build on every push.
 
-```
-config/                 models, publish mode, source lists
-data/                   vetted sources
-drizzle/migrations/     Postgres + pgvector schema
-scripts/pipeline.ts     CLI used by Railway cron
-src/app/                Next.js pages, RSS, sitemap, admin API
-src/lib/pipeline/       ingest, filters, rank, write, checks
-src/lib/pipeline/sources/   rss, huggingface, hackernews, x, scrape stub
-```
+## Configuration
+
+Settings come from `.env` (see [`.env.example`](.env.example)):
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Railway Postgres or Neon. Required in production. Local demo uses a file database when this is unset. |
+| `SITE_URL` | Canonical URL for RSS, sitemap, and private preview links |
+| `ADMIN_API_KEY` | Admin routes fail closed if unset. Needed to approve or reject. |
+| `CRON_SECRET` | Optional extra secret for ingest / compile callers |
+| `ANTHROPIC_API_KEY` | Live writing. Not needed for `--mock` |
+| `PUBLISH_MODE` | `manual` (default) or `auto` |
+| `PUBLISH_KILL_SWITCH` | When auto is on, this forces human review |
+| `FEATURE_X_SOURCES` | Off by default. X costs per read, and the live client is not wired in milestone 1 |
+| `MODEL_WRITING` | Default `claude-sonnet-5-5` |
+| `MODEL_RANKING` | Default `claude-sonnet-5-5` |
+| `MODEL_CHECKS` | Default `claude-haiku-4-5` |
+| `PROCESS_ROLE` | `web` (default) or `pipeline` |
+| `PIPELINE_JOB` | `ingest` or `compile` when `PROCESS_ROLE=pipeline` |
+
+`.env`, local databases and private data stay out of git. Keep them that way.
+
+## Project status
+
+Meridian is in **milestone 1**: a working end-to-end weekly edition, not a mature live publication.
+
+**Working**
+
+- [x] Next.js site for the weekly edition, archive, RSS, and sitemap
+- [x] Local demo with a file database and a mock Week 1 edition (no API keys)
+- [x] Pipeline CLI: ingest, compile, remind
+- [x] Blocking checks before approval
+- [x] Admin API to approve, reject, or request changes
+- [x] Hand-picked sources (RSS, Hugging Face, Hacker News as signal)
+- [x] Railway web service and cron via `PROCESS_ROLE`
+- [x] Tests and CI (`npm test` and a production build)
+
+**Not yet**
+
+- [ ] Sending the briefing by email or chat (compile and remind never send messages)
+- [ ] Live X ingest (the flag exists; the client is not wired)
+- [ ] Page-scrape and email source adapters (stubs only)
+- [ ] Treating auto-publish as the normal path (it exists, stays off, and still needs a human when thresholds fail)
+- [ ] Carrying over old Edge Daily posts (deliberately not migrated)
+
+## Contributing
+
+Contributions are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** first. Use only public or fictional sample data. Never commit credentials, traces, or databases. Run `npm test` before opening a pull request.
+
+## Security
+
+Please **do not open public issues for security problems.** Report them privately through GitHub's [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability) on this repository.
+
+Never paste tokens into issues or pull requests.
+
+## License
+
+[MIT](LICENSE) © 2026 Fabio Vella. Third-party dependencies keep their own licenses.
 
 ## Design credits
 
